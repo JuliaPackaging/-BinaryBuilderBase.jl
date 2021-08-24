@@ -38,17 +38,19 @@ function toolchain_file(bt::CMake, p::AbstractPlatform; is_host::Bool=false)
     # <https://cmake.org/cmake/help/latest/variable/CMAKE_CROSSCOMPILING.html>.
     # We want to have the host toolchain always setting `HOST_SYSTEM_NAME`, and
     # the target toolchain always setting `SYSTEM_NAME`.
-    system_name_var = if is_host
-        "CMAKE_HOST_SYSTEM_NAME"
-    else
-        "CMAKE_SYSTEM_NAME"
-    end
+    system_name_var = is_host ? "CMAKE_HOST_SYSTEM_NAME" : "CMAKE_SYSTEM_NAME"
+    libdir = Sys.iswindows(p) ? "bin" : "lib"
 
-    if Sys.isapple(p)
+    cmake = """
+        # CMake toolchain file for $(c_compiler(bt)) running on $(target)
+        set($(system_name_var) $(cmake_os(p)))
+        set(CMAKE_SYSTEM_PROCESSOR $(cmake_arch(p)))
+        """
+    cmake *= if Sys.isapple(p)
         darwin_ver = something(os_version(p), v"14.5.0")
         maj_ver = darwin_ver.major
         min_ver = darwin_ver.minor
-        return """
+        """
         # CMake toolchain file for $(c_compiler(bt)) running on $(target)
         set($(system_name_var) $(cmake_os(p)))
         set(CMAKE_SYSTEM_PROCESSOR $(cmake_arch(p)))
@@ -64,31 +66,16 @@ function toolchain_file(bt::CMake, p::AbstractPlatform; is_host::Bool=false)
             \${CMAKE_SYSROOT}/System/Library/Frameworks
             \${CMAKE_SYSROOT}/System/Library/PrivateFrameworks
         )
-        set(CMAKE_INSTALL_PREFIX \$ENV{prefix})
-
-        set(CMAKE_C_COMPILER   /opt/bin/$(target)/$(aatarget)-$(c_compiler(bt)))
-        set(CMAKE_CXX_COMPILER /opt/bin/$(target)/$(aatarget)-$(cxx_compiler(bt)))
-        set(CMAKE_Fortran_COMPILER /opt/bin/$(target)/$(aatarget)-$(fortran_compiler(bt)))
-
-        set(CMAKE_LINKER  /opt/bin/$(target)/$(aatarget)-ld)
-        set(CMAKE_OBJCOPY /opt/bin/$(target)/$(aatarget)-objcopy)
-
-        set(CMAKE_AR     /opt/bin/$(target)/$(aatarget)-ar)
-        set(CMAKE_NM     /opt/bin/$(target)/$(aatarget)-nm)
-        set(CMAKE_RANLIB /opt/bin/$(target)/$(aatarget)-ranlib)
-
-        if( \$ENV{CC} MATCHES ccache )
-            set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-        endif()
         """
     else
-        return """
-        # CMake toolchain file for $(c_compiler(bt)) running on $(target)
-        set($(system_name_var) $(cmake_os(p)))
-        set(CMAKE_SYSTEM_PROCESSOR $(cmake_arch(p)))
+        """
 
         set(CMAKE_SYSROOT /opt/$(aatarget)/$(aatarget)/sys-root/)
+        """
+    end
+    return cmake * """
         set(CMAKE_INSTALL_PREFIX \$ENV{prefix})
+        set(CMAKE_INSTALL_LIBDIR $(libdir))
 
         set(CMAKE_C_COMPILER   /opt/bin/$(target)/$(aatarget)-$(c_compiler(bt)))
         set(CMAKE_CXX_COMPILER /opt/bin/$(target)/$(aatarget)-$(cxx_compiler(bt)))
@@ -105,7 +92,6 @@ function toolchain_file(bt::CMake, p::AbstractPlatform; is_host::Bool=false)
             set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
         endif()
         """
-    end
 end
 
 meson_c_args(p::AbstractPlatform) = ["'-I/workspace/destdir/include'"]

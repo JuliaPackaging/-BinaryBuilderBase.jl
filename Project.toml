@@ -1,7 +1,7 @@
 name = "BinaryBuilderBase"
 uuid = "7f725544-6523-48cd-82d1-3fa08ff4056e"
 authors = ["Elliot Saba <staticfloat@gmail.com>"]
-version = "1.0.0"
+version = "1.0.1"
 
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
