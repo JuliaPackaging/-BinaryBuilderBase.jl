@@ -345,7 +345,7 @@ function setup(source::SetupSource{ArchiveSource}, targetdir, verbose; tar_flags
             # First unzip the pkg tarball from .conda file
             run(`unzip -q $(source.path) $pkg_name`)
             # Second untar the pkg tarball
-            pkg_source = SetupSource{ArchiveSource}(joinpath(targetdir, pkg_name), source.hash, source.target)
+            pkg_source = SetupSource{ArchiveSource}(source.url, joinpath(targetdir, pkg_name), source.hash, source.target)
             # Run setup again to untar the pkg binaries
             setup(pkg_source, targetdir, verbose; tar_flags = tar_flags)
         else

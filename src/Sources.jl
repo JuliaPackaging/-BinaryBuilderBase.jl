@@ -128,28 +128,29 @@ DirectorySource(path::String; target::String = "", follow_symlinks::Bool=false) 
     DirectorySource(path, target, follow_symlinks)
 
 # Try to guess if a URL is a Git repository
-isgitrepo(url::AbstractString) = endswith(url, ".git") || startswith(url, "git://")
+isgitrepo(url::AbstractString) = endswith(url, ".git") || startswith(url, "git://") || startswith(url, "ssh://")
 
 # This is not meant to be used as source in the `build_tarballs.jl` scripts but
 # only to set up the source in the workspace.
 struct SetupSource{T<:AbstractSource}
+    url::Union{String, Nothing}
     path::String
     hash::String
     target::String
     follow_symlinks::Bool
 end
 # `follow_symlinks` is used only for DirectorySource, let's have a method without it.
-SetupSource{T}(path::String, hash::String, target::String) where {T} =
-    SetupSource{T}(path, hash, target, false)
+SetupSource{T}(url::Union{Nothing, String}, path::String, hash::String, target::String) where {T} =
+    SetupSource{T}(url, path, hash, target, false)
 # This is used in wizard/obtain_source.jl to automatically guess the parameter
 # of SetupSource from the URL
 function SetupSource(url::String, path::String, hash::String, target::String)
     if isgitrepo(url)
-        return SetupSource{GitSource}(path, hash, target)
+        return SetupSource{GitSource}(url, path, hash, target)
     elseif any(endswith(path, ext) for ext in archive_extensions)
-        return SetupSource{ArchiveSource}(path, hash, target)
+        return SetupSource{ArchiveSource}(url, path, hash, target)
     else
-        return SetupSource{FileSource}(path, hash, target)
+        return SetupSource{FileSource}(url, path, hash, target)
     end
 end
 
@@ -158,10 +159,13 @@ struct PatchSource
     patch::String
 end
 
-function download_source(source::T; verbose::Bool = false, downloads_dir = storage_dir("downloads")) where {T<:Union{ArchiveSource,FileSource}}
+function download_source(source::Union{T, SetupSource{T}}; verbose::Bool = false, downloads_dir = storage_dir("downloads")) where {T<:Union{ArchiveSource,FileSource}}
     gettarget(s::ArchiveSource) = s.unpack_target
     gettarget(s::FileSource) = s.filename
-    if isfile(source.url)
+    gettarget(s::SetupSource) = s.target
+    if isa(source, SetupSource) && isfile(source.path) && verify(source.path, source.hash)
+        return source
+    elseif isfile(source.url)
         # Immediately abspath() a src_url so we don't lose track of
         # sources given to us with a relative path
         src_path = abspath(source.url)
@@ -173,7 +177,7 @@ function download_source(source::T; verbose::Bool = false, downloads_dir = stora
         src_path = joinpath(downloads_dir, string(source.hash, "-", basename(source.url)))
         download_verify(source.url, source.hash, src_path)
     end
-    return SetupSource{T}(src_path, source.hash, gettarget(source))
+    return SetupSource{T}(source.url, src_path, source.hash, gettarget(source))
 end
 
 struct GitTransferProgress
@@ -243,9 +247,10 @@ function cached_git_clone(url::String;
     return repo_path
 end
 
-function download_source(source::GitSource; kwargs...)
+function download_source(source::Union{GitSource, SetupSource{GitSource}}; kwargs...)
     src_path = cached_git_clone(source.url; hash_to_check=source.hash, kwargs...)
-    return SetupSource{GitSource}(src_path, source.hash, source.unpack_target)
+    return SetupSource{GitSource}(source.url, src_path, source.hash,
+        isa(source, GitSource) ? source.unpack_target : source.target)
 end
 
 function download_source(source::DirectorySource; verbose::Bool = false)
@@ -255,7 +260,7 @@ function download_source(source::DirectorySource; verbose::Bool = false)
     if verbose
         @info "Directory \"$(source.path)\" found"
     end
-    return SetupSource{DirectorySource}(abspath(source.path), "", source.target, source.follow_symlinks)
+    return SetupSource{DirectorySource}(nothing, abspath(source.path), "", source.target, source.follow_symlinks)
 end
 
 """
