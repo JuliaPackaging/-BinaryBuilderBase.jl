@@ -1001,8 +1001,16 @@ function generate_compiler_wrappers!(platform::AbstractPlatform; bin_path::Abstr
         # <https://github.com/JuliaPackaging/Yggdrasil/pull/2962>.
         xcrun_path = joinpath(bin_path, triplet(platform), "xcrun")
         write(xcrun_path, """
-              #!/bin/sh
-              exec "\${@}"
+              #!/bin/bash
+              if [[ "\${@}" == *"--show-sdk-path"* ]]; then
+                  echo /opt/$target/$target/sys-root
+              elif [[ "\${@}" == *"--show-sdk-version"* ]]; then
+                  grep -A1 '<key>Version</key>' /opt/$target/$target/sys-root/SDKSettings.plist \
+                  | tail -n1 \
+                  | sed -E -e 's/\s*<string>([^<]+)<\/string>\s*/\1/'
+              else
+                  exec "\${@}"
+              fi
               """)
         chmod(xcrun_path, 0o775)
     end
