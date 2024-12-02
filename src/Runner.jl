@@ -1001,15 +1001,38 @@ function generate_compiler_wrappers!(platform::AbstractPlatform; bin_path::Abstr
         # <https://github.com/JuliaPackaging/Yggdrasil/pull/2962>.
         xcrun_path = joinpath(bin_path, triplet(platform), "xcrun")
         write(xcrun_path, """
-              #!/bin/bash
-              if [[ "\${@}" == *"--show-sdk-path"* ]]; then
-                  echo /opt/$target/$target/sys-root
-              elif [[ "\${@}" == *"--show-sdk-version"* ]]; then
-                  grep -A1 '<key>Version</key>' /opt/$target/$target/sys-root/SDKSettings.plist \
+              #!/bin/sh
+                          
+              sdk_path=/opt/\$target/\$target/sys-root
+                          
+              show_sdk_path() {
+                  echo "\$1"
+              }
+                          
+              show_sdk_version() {
+                  grep -A1 '<key>Version</key>' \$1/SDKSettings.plist \
                   | tail -n1 \
-                  | sed -E -e 's/\s*<string>([^<]+)<\/string>\s*/\1/'
-              else
-                  exec "\${@}"
+                  | sed -E -e 's/\\s*<string>([^<]+)<\\/string>\\s*/\\1/'
+              }
+                          
+              while [ \$# -gt 0 ]; do
+                  case "\$1" in
+                      --show-sdk-path)
+                          show_sdk_path \$sdk_path
+                          shift
+                          ;;
+                      --show-sdk-version)
+                          show_sdk_version \$sdk_path
+                          shift
+                          ;;
+                      *)
+                          break
+                          ;;
+                  esac
+              done
+              
+              if [ \$# -gt 0 ]; then
+                "\$@"
               fi
               """)
         chmod(xcrun_path, 0o775)
