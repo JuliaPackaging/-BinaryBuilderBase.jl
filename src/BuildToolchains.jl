@@ -2,6 +2,7 @@ abstract type AbstractBuildToolchain{C} end
 
 struct CMake{C} <: AbstractBuildToolchain{C} end
 struct Meson{C} <: AbstractBuildToolchain{C} end
+struct Bazel{C} <: AbstractBuildToolchain{C} end
 
 c_compiler(::AbstractBuildToolchain{:clang}) = "clang"
 cxx_compiler(::AbstractBuildToolchain{:clang}) = "clang++"
@@ -274,6 +275,16 @@ function generate_toolchain_files!(platform::AbstractPlatform, envs::Dict{String
             symlink_if_exists("target_$(aatriplet(p))_gcc.cmake", joinpath(dir, "target_$(aatriplet(p)).cmake"))
             symlink_if_exists("target_$(aatriplet(p))_gcc.meson", joinpath(dir, "target_$(aatriplet(p)).meson"))
         end
+
+        # bazel (i.e. Google) doesn't like GCC
+        if platforms_match(p, platform)
+            write(joinpath(dir, "target_$(aatriplet(p))_clang.bzl"), toolchain_file(Bazel{:clang}(), p, host_platform; is_host=false))
+        end
+        if platforms_match(p, host_platform)
+            write(joinpath(dir, "host_$(aatriplet(p))_clang.bzl"), toolchain_file(Bazel{:clang}(), p, host_platform; is_host=true))
+        end
+        symlink_if_exists("host_$(aatriplet(p))_clang.bzl", joinpath(dir, "host_$(aatriplet(p)).bzl"))
+        symlink_if_exists("target_$(aatriplet(p))_clang.bzl", joinpath(dir, "target_$(aatriplet(p)).bzl"))
     end
 end
 
@@ -300,4 +311,169 @@ function cargo_config_file!(dir::AbstractString, platform::AbstractPlatform;
                   protocol = 'sparse'
                   """)
     end
+end
+
+function bazel_cpu(p::AbstractPlatform)
+    if arch(p) == "x86_64"
+        return "k8"
+    else
+        return arch(p)
+    end
+end
+
+# TODO distinguish between clang and gcc toolchains?
+# TODO in _impl, get cpu, target_libc, abi_version and abi_libc_version from host + env info
+# TODO add `-lm` to `link_libs` on Reactant
+function toolchain_file(bt::Bazel, p::AbstractPlatform, host_platform::AbstractPlatform; is_host::Bool=false, clang_use_lld::Bool=false)
+    target = triplet(p)
+    aatarget = aatriplet(p)
+    host_target = triplet(host_platform) # TODO fix this
+
+    return """
+    load("@rules_cc//cc:defs.bzl", "cc_toolchain")
+    load(
+        "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
+        "action_config",
+        "artifact_name_pattern",
+        "feature",
+        "feature_set",
+        "flag_group",
+        "flag_set",
+        "tool",
+        "tool_path",
+        "variable_with_value",
+        "with_feature_set",
+    )
+
+    def _impl(ctx):
+        return cc_common.create_cc_toolchain_config_info(
+            ctx = ctx,
+            features = [...], # TODO
+            cxx_builtin_include_directories = [
+                # TODO maybe requires to add them to `compile_flags` with `-isystem`
+                # TODO are these really required?
+                # "/opt/$(aatarget)/lib/gcc/$(aatarget)/10.2.0/include",
+                # "/opt/$(aatarget)/lib/gcc/$(aatarget)/10.2.0/include-fixed",
+                # TODO these paths should use %sysroot% instead of hardcoding the sysroot
+                # "/opt/$(aatarget)/$(aatarget)/include",
+                # "/opt/$(aatarget)/$(aatarget)/sys-root/usr/include",
+                # "/opt/$(aatarget)/$(aatarget)/include/c++/10.2.0",
+                # "/opt/$(aatarget)/$(aatarget)/include/c++/10.2.0/$(aatarget)",
+                # "/opt/$(aatarget)/$(aatarget)/include/c++/10.2.0/backward",
+                # "/opt/$(aatarget)/$(aatarget)/include/c++/10.2.0/parallel",
+                "%sysroot%/../include",
+                "%sysroot%/usr/include",
+                "%sysroot%/../include/c++/10.2.0",
+                "%sysroot%/../include/c++/10.2.0/$(aatarget)",
+                "%sysroot%/../include/c++/10.2.0/backward",
+                "%sysroot%/../include/c++/10.2.0/parallel",
+            ],
+            toolchain_identifier = ctx.attr.toolchain_identifier,
+            target_system_name = ctx.attr.target_system_name,
+            target_cpu = "$(bazel_cpu(p))",
+            target_libc = "unknown", # TODO get from platform on BB's generation step
+            compiler = "clang",
+            abi_version = "unknown", # TODO get from platform on BB's generation step
+            abi_libc_version = "unknown", # TODO get from platform on BB's generation step
+            tool_paths = [
+                tool_path(name = "ar", path = "/opt/bin/$(target)/ar"),
+                tool_path(name = "as", path = "/opt/bin/$(target)/as"),
+                tool_path(name = "c++", path = "/opt/bin/$(target)/c++"),
+                tool_path(name = "c++filt", path = "/opt/bin/$(target)/c++filt"),
+                tool_path(name = "cc", path = "/opt/bin/$(target)/cc"),
+                tool_path(name = "clang", path = "/opt/bin/$(target)/clang"),
+                tool_path(name = "clang++", path = "/opt/bin/$(target)/clang++"),
+                tool_path(name = "cpp", path = "/opt/bin/$(target)/cpp"),
+                tool_path(name = "f77", path = "/opt/bin/$(target)/f77"),
+
+                # WARN we force to use clang instead of gcc
+                # tool_path(name = "g++", path = "/opt/bin/$(target)/clang++"),
+                # tool_path(name = "gcc", path = "/opt/bin/$(target)/clang"),
+
+                tool_path(name = "gfortran", path = "/opt/bin/$(target)/gfortran"),
+                tool_path(name = "ld", path = "/opt/bin/$(target)/ld"),
+                tool_path(name = "ld.lld", path = "/opt/bin/$(target)/ld.lld"),
+                tool_path(name = "libtool", path = "/opt/bin/$(target)/libtool"),
+                tool_path(name = "lld", path = "/opt/bin/$(target)/lld"),
+                tool_path(name = "nm", path = "/opt/bin/$(target)/nm"),
+                tool_path(name = "objcopy", path = "/opt/bin/$(target)/objcopy"),
+                tool_path(name = "patchelf", path = "/opt/bin/$(target)/patchelf"),
+                tool_path(name = "ranlib", path = "/opt/bin/$(target)/ranlib"),
+                tool_path(name = "readelf", path = "/opt/bin/$(target)/readelf"),
+                tool_path(name = "strip", path = "/opt/bin/$(target)/strip"),
+
+                # from host
+                tool_path(name = "llvm-cov", path = "/opt/$(host_target)/bin/llvm-cov"),
+                tool_path(name = "llvm-profdata", path = "/opt/$(host_target)/bin/llvm-profdata"),
+                tool_path(name = "objdump", path = "/usr/bin/objdump"),
+            ],
+            builtin_sysroot = "/opt/$(aatarget)/$(aatarget)/sys-root/",
+        )
+
+    ygg_cc_toolchain_config = rule(
+        implementation = _impl,
+        attrs = {
+            toolchain_identifier = attr.string(mandatory = True),
+            target_system_name = attr.string(mandatory = True),
+            compile_flags = attr.string_list(default = [
+                "-fstack-protector",
+                "-Wall",
+                "-Wunused-but-set-parameter",
+                "-Wno-free-nonheap-object",
+                "-fno-omit-frame-pointer",
+            ]),
+            opt_compile_flags = attr.string_list(default = [
+                "-g0",
+                "-O2",
+                "-D_FORTIFY_SOURCE=1",
+                "-DNDEBUG",
+                "-ffunction-sections",
+                "-fdata-sections",
+            ]),
+            dbg_compile_flags = attr.string_list(["-g]),
+            link_flags = attr.string_list(default = []),
+            link_libs = attr.string_list(default = ["-lstdc++"]),
+            opt_link_flags = attr.string_list(default = ["-Wl,--gc-sections"]),
+            unfiltered_compile_flags = attr.string_list(default = [
+                "-no-canonical-prefixes",
+                "-Wno-builtin-macro-redefined",
+                "-D__DATE__=\"redacted\"",
+                "-D__TIMESTAMP__=\"redacted\"",
+                "-D__TIME__=\"redacted\"",
+                "-Wno-unused-command-line-argument",
+                "-Wno-gnu-offsetof-extensions",
+            ]),
+            coverage_compile_flags = attr.string_list(default = ["--coverage"]),
+            coverage_link_flags = attr.string_list(default = ["--coverage"]),
+        },
+        provides = [CcToolchainConfigInfo],
+    )
+
+    def ygg_cc_toolchain(**kwargs):
+        cpu = "aarch64"
+        toolchain_identifier = "ygg_$(is_host ? "host" : "target")_toolchain"
+        supports_start_end_lib = False
+
+        cc_toolchain(
+            name = "ygg_$(is_host ? "host" : "target")_cc_toolchain",
+            all_files = ":empty",
+            compiler_files = ":empty",
+            dwp_files = ":empty",
+            linker_files = ":empty",
+            objcopy_files = ":empty",
+            strip_files = ":empty",
+            supports_param_files = 1,
+            toolchain_config = ":ygg_$(is_host ? "host" : "target")_cc_toolchain_config",
+            toolchain_identifier = toolchain_identifier,
+        )
+
+        ygg_cc_toolchain_config(
+            name = "ygg_$(is_host ? "host" : "target")_cc_toolchain_config",
+            toolchain_identifier = toolchain_identifier,
+            target_system_name = "$(os(p))"
+            # TODO gcc doesn't support it, only put it on clang (maybe even only for clang on aarch64-darwin?)
+            # supports_start_end_lib = supports_start_end_lib,
+            **kwargs,
+        )
+    """
 end
