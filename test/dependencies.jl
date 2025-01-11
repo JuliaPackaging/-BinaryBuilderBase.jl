@@ -32,8 +32,8 @@ end
 
 @testset "Dependencies" begin
     name = "Foo_jll"
-    dep = Dependency(PackageSpec(; name = name); platforms=supported_platforms(; experimental=true, exclude=!Sys.isapple))
-    @test Dependency(name) ≈ dep
+    dep = Dependency(PackageSpec(; name = name); compat="0", platforms=supported_platforms(; experimental=true, exclude=!Sys.isapple))
+    @test Dependency(name; compat="0") ≈ dep
     @test !is_host_dependency(dep)
     @test is_target_dependency(dep)
     @test is_build_dependency(dep)
@@ -41,26 +41,26 @@ end
     @test !is_top_level_dependency(dep)
     @test getname(dep) == name
     @test getname(PackageSpec(; name = name)) == name
-    @test getpkg(dep) == PackageSpec(; name = name)
-    @test getcompat(dep) == ""
+    @test getpkg(dep) == PackageSpec(; name = name, version = PKG_VERSIONS.VersionSpec(v"0"))
+    @test getcompat(dep) == "0"
 
     build_version = v"1.2.3"
-    dep_buildver = Dependency(PackageSpec(; name = name), build_version)
-    @test Dependency(name, build_version) == dep_buildver
+    dep_buildver = Dependency(PackageSpec(; name = name), build_version; compat = "~1.2")
+    @test Dependency(name, build_version; compat="~1.2") == dep_buildver
     @test getname(dep_buildver) == name
     @test getpkg(dep_buildver) == PackageSpec(; name = name, version = PKG_VERSIONS.VersionSpec(build_version))
-    @test getcompat(dep_buildver) == ""
+    @test getcompat(dep_buildver) == "~1.2"
 
-    # the same but with compat info
+    # the same but with platforms argument
     dep_buildver = Dependency(PackageSpec(; name = name), build_version; compat = "~1.2", platforms=[Platform("x86_64", "linux"; cxxstring_abi="cxx11")])
-    @test Dependency(name, build_version) ≈ dep_buildver
+    @test Dependency(name, build_version; compat="~1.2") ≈ dep_buildver
     @test getname(dep_buildver) == name
     @test getpkg(dep_buildver) == PackageSpec(; name = name, version = PKG_VERSIONS.VersionSpec(build_version))
     @test getcompat(dep_buildver) == "~1.2"
 
     # the same but only with compat specifier
     dep_compat = Dependency(PackageSpec(; name); compat = "2, ~$(build_version)")
-    @test Dependency(name, build_version) ≈ dep_compat
+    @test Dependency(name, build_version; compat="2, ~$(build_version)") ≈ dep_compat
     @test getname(dep_compat) == name
     @test getpkg(dep_compat) == PackageSpec(; name, version = PKG_VERSIONS.VersionSpec(build_version))
     @test getcompat(dep_compat) == "2, ~$(build_version)"
@@ -68,8 +68,12 @@ end
     # if build_version and compat don't match, an error should be thrown
     @test_throws ArgumentError Dependency(PackageSpec(; name = name), build_version; compat = "2.0")
 
+    # Runtime dependencies without compat bounds should throw an error
+    @test_throws ArgumentError Dependency(name)
+    @test_throws ArgumentError RuntimeDependency(name)
+
     run_dep = RuntimeDependency(PackageSpec(; name); compat="3.14")
-    @test RuntimeDependency(name) ≈ run_dep
+    @test RuntimeDependency(name; compat="3.14") ≈ run_dep
     @test !is_host_dependency(run_dep)
     @test is_target_dependency(run_dep)
     @test !is_build_dependency(run_dep)
@@ -82,8 +86,8 @@ end
     # We should be able to convert a `Vector{RuntimeDependency}` to `Vector{Dependency}`
     @test Dependency[RuntimeDependency(name; compat="~1.8", platforms=[Platform("aarch64", "macos"; cxxstring_abi="cxx03")])] ==
         [Dependency(name; compat="~1.8", platforms=[Platform("aarch64", "macos"; cxxstring_abi="cxx03")])]
-    @test @test_logs((:warn, r"was defined as top-level"), Dependency[RuntimeDependency(name; top_level=true)]) ==
-        [@test_logs((:warn, r"was defined as top-level"), Dependency(name; top_level=true))]
+    @test @test_logs((:warn, r"was defined as top-level"), Dependency[RuntimeDependency(name; compat="1", top_level=true)]) ==
+        [@test_logs((:warn, r"was defined as top-level"), Dependency(name; compat="1", top_level=true))]
     # If the version in the PackageSpec and the compat don't match, an error should be thrown
     @test_throws ArgumentError RuntimeDependency(PackageSpec(; name, version=v"1.2.3"); compat = "2.0")
 
@@ -112,12 +116,12 @@ end
     @test getpkg(host_dep) == PackageSpec(; name = host_name)
 
     top_level_name = "MPIPreferences"
-    @test_logs (:warn, r"deprecated") @test_throws ArgumentError Dependency(PackageSpec(; name=top_level_name); platforms=supported_platforms(; exclude=!Sys.isapple), top_level=true)
-    @test_throws ArgumentError RuntimeDependency(PackageSpec(; name=top_level_name); platforms=supported_platforms(; exclude=!Sys.isapple), top_level=true)
+    @test_logs (:warn, r"deprecated") @test_throws ArgumentError Dependency(PackageSpec(; name=top_level_name); compat="0", platforms=supported_platforms(; exclude=!Sys.isapple), top_level=true)
+    @test_throws ArgumentError RuntimeDependency(PackageSpec(; name=top_level_name); compat="1", platforms=supported_platforms(; exclude=!Sys.isapple), top_level=true)
 
-    top_level_dep = @test_logs (:warn, r"deprecated") Dependency(PackageSpec(; name = top_level_name); top_level=true)
+    top_level_dep = @test_logs (:warn, r"deprecated") Dependency(PackageSpec(; name = top_level_name); compat="1", top_level=true)
     @test is_top_level_dependency(top_level_dep)
-    top_level_dep = RuntimeDependency(PackageSpec(; name = top_level_name); top_level=true)
+    top_level_dep = RuntimeDependency(PackageSpec(; name = top_level_name); compat="1", top_level=true)
     @test is_top_level_dependency(top_level_dep)
 
     @testset "Filter dependencies by platform" begin
@@ -127,7 +131,7 @@ end
 
     @testset "JSON (de)serialization" begin
         jdep = JSON.lower(dep)
-        @test jdep == Dict("type" => "dependency", "name" => name, "uuid" => nothing, "compat" => "", "version-major" => 0x0, "version-minor" => 0x0, "version-patch" => 0x0, "platforms" => ["x86_64-apple-darwin", "aarch64-apple-darwin"], "top_level" => false)
+        @test jdep == Dict("type" => "dependency", "name" => name, "uuid" => nothing, "compat" => "0", "version-major" => 0x0, "version-minor" => 0x0, "version-patch" => 0x0, "platforms" => ["x86_64-apple-darwin", "aarch64-apple-darwin"], "top_level" => false)
         @test dependencify(jdep) == dep
 
         jrun_dep = JSON.lower(run_dep)
@@ -147,14 +151,14 @@ end
         @test jhost_dep == Dict("type" => "hostdependency", "name" => host_name, "uuid" => nothing, "compat" => "", "version-major" => 0x0, "version-minor" => 0x0, "version-patch" => 0x0, "platforms" => ["any"], "top_level" => false)
         @test dependencify(jhost_dep) == host_dep
 
-        full_dep = Dependency(PackageSpec(; name = "Baz_jll", uuid = "00000000-1111-2222-3333-444444444444", version = PKG_VERSIONS.VersionSpec("3.1.4")))
+        full_dep = Dependency(PackageSpec(; name = "Baz_jll", uuid = "00000000-1111-2222-3333-444444444444", version = PKG_VERSIONS.VersionSpec("3.1.4")); compat="3")
         jfull_dep = JSON.lower(full_dep)
-        @test jfull_dep == Dict("type" => "dependency", "name" => "Baz_jll", "uuid" => "00000000-1111-2222-3333-444444444444", "compat" => "", "version-major" => 0x3, "version-minor" => 0x1, "version-patch" => 0x4, "platforms" => ["any"], "top_level" => false)
+        @test jfull_dep == Dict("type" => "dependency", "name" => "Baz_jll", "uuid" => "00000000-1111-2222-3333-444444444444", "compat" => "3", "version-major" => 0x3, "version-minor" => 0x1, "version-patch" => 0x4, "platforms" => ["any"], "top_level" => false)
         @test dependencify(jfull_dep) == full_dep
         @test_throws ErrorException dependencify(Dict("type" => "git"))
 
         jtop_level_dep = JSON.lower(top_level_dep)
-        @test jtop_level_dep == Dict("type" => "runtimedependency", "name" => "MPIPreferences", "uuid" => nothing, "compat" => "", "version-major" => 0x0, "version-minor" => 0x0, "version-patch" => 0x0, "platforms" => ["any"], "top_level" => true)
+        @test jtop_level_dep == Dict("type" => "runtimedependency", "name" => "MPIPreferences", "uuid" => nothing, "compat" => "1", "version-major" => 0x0, "version-minor" => 0x0, "version-patch" => 0x0, "platforms" => ["any"], "top_level" => true)
         @test dependencify(jtop_level_dep) == top_level_dep
     end
 
@@ -174,7 +178,7 @@ end
         with_temp_project() do dir
             prefix = Prefix(dir)
             dependencies = [
-                Dependency("Zlib_jll")
+                Dependency("Zlib_jll"; compat="1.2.12")
             ]
             platform = HostPlatform()
             ap = test_setup_dependencies(prefix, getpkg.(dependencies), platform)
@@ -209,7 +213,7 @@ end
         with_temp_project() do dir
             prefix = Prefix(dir)
             dependencies = [
-                Dependency("LibCURL_jll")
+                Dependency("LibCURL_jll"; compat="7.73, 8")
             ]
             platform = HostPlatform()
             ap = test_setup_dependencies(prefix, getpkg.(dependencies), platform)
@@ -232,7 +236,7 @@ end
         with_temp_project() do dir
             prefix = Prefix(dir)
             dependencies = [
-                Dependency("LibOSXUnwind_jll")
+                Dependency("LibOSXUnwind_jll"; compat="0.0.7")
             ]
             platform = Platform("i686", "linux"; libc="musl")
             # `match_mode=:any` is a workaround for
@@ -246,7 +250,7 @@ end
         # Test setup of dependencies that depend on the Julia version
         with_temp_project() do dir
             prefix = Prefix(dir)
-            dependencies = [Dependency("GMP_jll")]
+            dependencies = [Dependency("GMP_jll"; compat="6.1.2")]
             platform = Platform("x86_64", "linux"; julia_version=v"1.5")
 
             # Test that a particular version of GMP is installed
@@ -257,7 +261,7 @@ end
         # Next, test on Julia v1.6
         with_temp_project() do dir
             prefix = Prefix(dir)
-            dependencies = [Dependency("GMP_jll")]
+            dependencies = [Dependency("GMP_jll"; compat="6.2.1")]
             platform = Platform("x86_64", "linux"; julia_version=v"1.6")
 
             # Test that a particular version of GMP is installed
@@ -269,8 +273,8 @@ end
         with_temp_project() do dir
             prefix = Prefix(dir)
             dependencies = [
-                 Dependency("GMP_jll", v"6.1.2"),
-                 Dependency("MPFR_jll",v"4.1.0"),
+                 Dependency("GMP_jll"; compat="6.1.2"),
+                 Dependency("MPFR_jll"; compat="4.1.0"),
             ]
 
             # Test that this is not instantiatable with either Julia v1.5 or v1.6
@@ -371,30 +375,16 @@ end
 end
 
 @testset "resolve_jlls" begin
-    # Deps given by name::String
-    dependencies = ["OpenSSL_jll",]
-    @test_logs (:warn, r"use Dependency instead") begin
-        truefalse, resolved_deps = resolve_jlls(dependencies)
-        @test truefalse
-        @test all(x->getpkg(x).uuid !== nothing, resolved_deps)
-    end
-    # Deps given by name::PackageSpec
-    @test_logs (:warn, r"use Dependency instead") begin
-        dependencies = [PackageSpec(name="OpenSSL_jll"),]
-        truefalse, resolved_deps = resolve_jlls(dependencies)
-        @test truefalse
-        @test all(x->getpkg(x).uuid !== nothing, resolved_deps)
-    end
     # Deps given by (name,uuid)::PackageSpec
-    dependencies = [Dependency(PackageSpec(name="OpenSSL_jll", uuid="458c3c95-2e84-50aa-8efc-19380b2a3a95")),]
+    dependencies = [Dependency(PackageSpec(name="OpenSSL_jll", uuid="458c3c95-2e84-50aa-8efc-19380b2a3a95"); compat="3.0.3"),]
     truefalse, resolved_deps = resolve_jlls(dependencies)
     @test truefalse
     @test all(x->getpkg(x).uuid !== nothing, resolved_deps)
     # Deps given by combination of name::String, name::PackageSpec and (name,uuid)::PackageSpec
     dependencies = [
-        Dependency("Zlib_jll"),
-        Dependency(PackageSpec(name="Bzip2_jll")),
-        Dependency(PackageSpec(name="OpenSSL_jll", uuid="458c3c95-2e84-50aa-8efc-19380b2a3a95")),
+        Dependency("Zlib_jll"; compat="1.2.13"),
+        Dependency(PackageSpec(name="Bzip2_jll"); compat="1.0.8"),
+        Dependency(PackageSpec(name="OpenSSL_jll", uuid="458c3c95-2e84-50aa-8efc-19380b2a3a95"); compat="3.0.3"),
     ]
     truefalse, resolved_deps = resolve_jlls(dependencies)
     @test truefalse
