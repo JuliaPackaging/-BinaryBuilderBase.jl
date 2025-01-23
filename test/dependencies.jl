@@ -205,6 +205,36 @@ end
             @test readdir(joinpath(destdir(dir, platform), "logs")) == [] broken=VERSION≥v"1.7.3"
         end
 
+        # Make sure we can use `get_addable_spec` to install weird packages like
+        # `LibOSXUnwind_jll` v0.0.6+1, see https://github.com/JuliaLang/Pkg.jl/issues/2942
+        with_temp_project() do dir
+            prefix = Prefix(dir)
+            spec = get_addable_spec("LibOSXUnwind_jll", v"0.0.6+1")
+            dependencies = [BuildDependency(spec)]
+            platform = Platform("x86_64", "macos"; julia_version="1.6.0")
+            pkg_dir = Pkg.Operations.find_installed(spec.name, spec.uuid, spec.tree_hash)
+            # Delete the directory where the package would be installed, to make sure it is
+            # actually installed.  Note: a cleaner way to do this would be to use a fresh
+            # depot, but it'd add lots of complexity and this package isn't needed by any
+            # sane project.
+            rm(pkg_dir; recursive=true, force=true)
+            # This is broken in v1.7, see https://github.com/JuliaLang/Pkg.jl/issues/2942
+            @test setup_dependencies(prefix, getpkg.(dependencies), platform) isa Vector{String} broken=VERSION<v"1.8.0-DEV"
+            @test all(in(readdir(joinpath(destdir(dir, platform), "lib"))), ("libosxunwind.a", "libosxunwind.dylib")) broken=VERSION<v"1.8.0-DEV"
+            # Make sure the right directory is installed.
+            @test isdir(pkg_dir) broken=VERSION<v"1.8.0-DEV"
+        end
+
+        # Make sure we can install `libjulia_jll` for julia v1.6.0
+        with_temp_project() do dir
+            prefix = Prefix(dir)
+            dependencies = [BuildDependency("libjulia_jll")]
+            platform = Platform("x86_64", "macos"; julia_version="1.6.0")
+            # This is broken in v1.7, see https://github.com/JuliaLang/Pkg.jl/issues/2942
+            @test setup_dependencies(prefix, getpkg.(dependencies), platform) isa Vector{String} broken=VERSION<v"1.8.0-DEV"
+            @test all(in(readdir(joinpath(destdir(dir, platform), "lib"))), ("libjulia.1.6.dylib", "libjulia.1.dylib", "libjulia.dylib")) broken=VERSION<v"1.8.0-DEV"
+        end
+
         # Setup a dependency of a JLL package which is also a standard library
         with_temp_project() do dir
             prefix = Prefix(dir)
