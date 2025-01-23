@@ -14,7 +14,7 @@ export HostPlatform, platform_dlext, valid_dl_path, arch, libc,
        Platform, AnyPlatform
 
 export AbstractSource, AbstractDependency, SetupSource, PatchSource,
-    resolve_jlls, coerce_dependency, coerce_source, Runner,
+    resolve_jlls, coerce_source, Runner,
     generate_compiler_wrappers!, preferred_runner, CompilerShard, UserNSRunner,
     DockerRunner, choose_shards, exeext, preferred_libgfortran_version,
     preferred_cxxstring_abi, gcc_version, available_gcc_builds, getversion,

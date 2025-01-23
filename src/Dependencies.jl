@@ -85,10 +85,8 @@ the latest version of the package compatible with the environment will be
 automatically chosen by the package resolver, unless `compat` is specified, see
 below.
 
-The optional keyword argument `compat` can be used to specify a string for use
-in the `Project.toml` of the generated Julia package.  If `compat` is non-empty
-and `build_version` is not passed, the latter defaults to the minimum version
-compatible with the `compat` specifier.
+The keyword argument `compat` must be used to specify a string for use in the `Project.toml` of the generated Julia package.
+If `build_version` is not passed, the minimum version compatible with the `compat` specifier is used as build version.
 
 The optional keyword argument `platforms` is a vector of `AbstractPlatform`s
 which indicates for which platforms the dependency should be used.  By default
@@ -123,9 +121,12 @@ struct Dependency <: AbstractDependency
             if build_version ∉ spec
                 throw(ArgumentError("build_version and compat for $(pkg) are incompatible"))
             end
-            if pkg.version != PKG_VERSIONS.VersionSpec("*") && !(pkg.version in spec)
-                throw(ArgumentError("PackageSpec version and compat for $(pkg) are incompatible"))
+            if pkg.version != PKG_VERSIONS.VersionSpec("*")
+                compatible_p = pkg.version isa PKG_VERSIONS.VersionSpec ? !isempty(intersect(pkg.version, spec)) : (pkg.version in spec)
+                compatible_p || throw(ArgumentError("""PackageSpec version and compat ("$(compat)") for $(pkg) are incompatible"""))
             end
+        else
+            throw(ArgumentError("""Dependency("$(getname(pkg))") must have a non-empty compat bound."""))
         end
         if top_level
             @warn("Dependency(\"$(getname(pkg))\") was defined as top-level but this is deprecated, use `RuntimeDependency` instead")
@@ -154,8 +155,7 @@ Define a binary dependency that is only listed as dependency of the generated JL
 but its artifact is not installed in the prefix during the build.  The `dep` argument can be
 either a string with the name of the JLL package or a `Pkg.PackageSpec`.
 
-The optional keyword argument `compat` can be used to specify a string for use
-in the `Project.toml` of the generated Julia package.
+The keyword argument `compat` must be used to specify a string for use in the `Project.toml` of the generated Julia package.
 
 The optional keyword argument `platforms` is a vector of `AbstractPlatform`s which indicates
 for which platforms the dependency should be used.  By default `platforms=[AnyPlatform()]`,
@@ -176,9 +176,12 @@ struct RuntimeDependency <: AbstractDependency
                                top_level::Bool=false)
         if !isempty(compat)
             spec = PKG_VERSIONS.semver_spec(compat) # verify compat is valid
-            if pkg.version != PKG_VERSIONS.VersionSpec("*") && !(pkg.version in spec)
-                throw(ArgumentError("PackageSpec version and compat for $(pkg) are incompatible"))
+            if pkg.version != PKG_VERSIONS.VersionSpec("*")
+                compatible_p = pkg.version isa PKG_VERSIONS.VersionSpec ? !isempty(intersect(pkg.version, spec)) : (pkg.version in spec)
+                compatible_p || throw(ArgumentError("""PackageSpec version and compat ("$(compat)") for $(pkg) are incompatible"""))
             end
+        else
+            throw(ArgumentError("""RuntimeDependency("$(getname(pkg))") must have a non-empty compat bound."""))
         end
         if top_level
             if !(isempty(platforms) || all(==(AnyPlatform()), platforms))
@@ -276,7 +279,9 @@ filter_platforms(deps::AbstractVector{<:AbstractDependency}, p::AbstractPlatform
 function registry_resolve!(ctx, dependencies::Vector{<:AbstractDependency})
     resolved_dependencies = Pkg.Types.registry_resolve!(ctx.registries, getpkg.(dependencies))
     for idx in eachindex(dependencies)
-        dependencies[idx] = typeof(dependencies[idx])(resolved_dependencies[idx]; platforms=dependencies[idx].platforms)
+        dependencies[idx] = typeof(dependencies[idx])(resolved_dependencies[idx];
+                                                      compat=dependencies[idx].compat,
+                                                      platforms=dependencies[idx].platforms)
     end
     return dependencies
 end
@@ -300,8 +305,7 @@ function resolve_jlls(dependencies::Vector; ctx = Pkg.Types.Context(), outs=stdo
     end
 
     # Don't clobber caller
-    # XXX: Coercion is needed as long as we support old-style dependencies.
-    dependencies = deepcopy(coerce_dependency.(dependencies))
+    dependencies = deepcopy(dependencies)
 
     # If all dependencies already have a UUID, return early
     if all(x->getpkg(x).uuid !== nothing, dependencies)
@@ -377,13 +381,4 @@ function dependencify(d::Dict)
         end
     end
     error("Cannot convert to dependency")
-end
-
-
-# XXX: compatibility functions.  These are needed until we support old-style
-# dependencies.
-coerce_dependency(dep::AbstractDependency) = dep
-function coerce_dependency(dep)
-    @warn "Using PackageSpec or string as dependency is deprecated, use Dependency instead"
-    Dependency(dep)
 end
