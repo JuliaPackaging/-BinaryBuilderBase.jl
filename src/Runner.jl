@@ -1210,6 +1210,10 @@ function platform_envs(platform::AbstractPlatform, src_name::AbstractString;
             "CARGO_BUILD_TARGET" => map_rust_target(platform),
             "CARGO_HOME" => "/opt/$(host_target)",
             "RUSTUP_HOME" => "/opt/$(host_target)",
+            # `TARGET` and `HOST` are needed in some build systems:
+            # <https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts>.
+            "TARGET" => map_rust_target(platform),
+            "HOST" => map_rust_target(host_platform),
         ))
         if rust_version !== nothing
             merge!(mapping, Dict(
@@ -1294,6 +1298,10 @@ function platform_envs(platform::AbstractPlatform, src_name::AbstractString;
            )
             mapping[host_map(env_name)] = tool
         end
+    end
+
+    if :rust in compilers
+        mapping["HOST_CC"] = mapping["HOSTCC"]
     end
 
     # There is no easy way to automatically determine the version of glibc for
