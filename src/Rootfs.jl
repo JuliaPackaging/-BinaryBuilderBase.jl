@@ -1075,20 +1075,39 @@ function preferred_cxxstring_abi(platform::AbstractPlatform, shard::CompilerShar
 end
 
 """
-    download_all_artifacts(; verbose::Bool=false)
+    download_all_artifacts(; verbose::Bool=false, concurrency=1)
 
 Helper function to download all shards/helper binaries so that no matter what
 happens, you don't need an internet connection to build your precious, precious
 binaries.
 """
-function download_all_artifacts(; verbose::Bool = false)
+function download_all_artifacts(; verbose::Bool = false, concurrency=1)
     artifacts_toml = joinpath(dirname(@__DIR__), "Artifacts.toml")
-    ensure_all_artifacts_installed(
-        artifacts_toml;
-        include_lazy=true,
-        verbose=verbose,
-        platform=default_host_platform,
-    )
+    artifacts = select_downloadable_artifacts(artifacts_toml; platform=default_host_platform, include_lazy=true)
+    if concurrency == 1
+        for name in keys(artifacts)
+            ensure_artifact_installed(name, artifacts[name], artifacts_toml; verbose=verbose)
+        end
+        return nothing
+    end
+    taskpool = Channel{Task}(concurrency) do ch
+        for name in keys(artifacts)
+            t = @task ensure_artifact_installed(name, artifacts[name], artifacts_toml; verbose=false)
+            put!(ch, t)
+        end
+    end
+    verbose && @info "launch $concurrency concurrent downloading tasks"
+    wait(taskpool)
+    @sync for _ in 1:concurrency
+        @async begin
+            while !isempty(taskpool)
+                t = take!(taskpool)
+                schedule(t)
+                wait(t)
+            end
+        end
+    end
+    return nothing
 end
 
 const _sudo_cmd = Ref{Union{Cmd,Nothing}}(nothing)
