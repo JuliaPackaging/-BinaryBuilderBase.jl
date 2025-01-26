@@ -1255,6 +1255,8 @@ function platform_envs(platform::AbstractPlatform, src_name::AbstractString;
         "CMAKE_TARGET_TOOLCHAIN" => "/opt/toolchains/$(triplet(platform))/target_$(target).cmake",
         "MESON_HOST_TOOLCHAIN" => "/opt/toolchains/$(triplet(host_platform))/host_$(host_target).meson",
         "MESON_TARGET_TOOLCHAIN" => "/opt/toolchains/$(triplet(platform))/target_$(target).meson",
+        "BAZEL_HOST_TOOLCHAIN" => "/opt/toolchains/$(triplet(host_platform))/host_$(host_target).bzl",
+        "BAZEL_TARGET_TOOLCHAIN" => "/opt/toolchains/$(triplet(platform))/target_$(target).bzl",
 
         # We should always be looking for packages already in the prefix
         "PKG_CONFIG_PATH" => "$(prefix)/lib/pkgconfig:$(prefix)/lib64/pkgconfig:$(prefix)/share/pkgconfig",
